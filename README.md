@@ -1,24 +1,93 @@
 # EcoPulse
 
-Plataforma móvel distribuída para monitoramento colaborativo de riscos ambientais urbanos e qualidade do ar.
+**Plataforma distribuída mobile para monitoramento colaborativo de riscos ambientais urbanos e qualidade do ar.**
 
-Trabalho da disciplina **Desenvolvimento de Sistemas Distribuídos (DSD)**, Ciência da Computação, UNIP, 2026/2.
+Atividade Prática Supervisionada (APS) da disciplina **Desenvolvimento de Sistemas Distribuídos (DSD)** — Ciência da Computação, Universidade Paulista (UNIP), 8º semestre, 2026/2. Professor: Jean Scatena. Ribeirão Preto, 2026.
 
-Este repositório ainda não tem código da aplicação. A pasta `docs/` é o norte do desenvolvimento: o que o sistema é, o que já foi decidido, o que falta fazer e o que já foi feito. Quem for implementar (pessoa ou sessão de IA) lê os documentos nesta ordem antes de alterar qualquer coisa:
+> **Status:** em desenvolvimento. O progresso, tarefa por tarefa, está em [`docs/11-progresso.md`](docs/11-progresso.md).
 
-1. [docs/00-como-usar.md](docs/00-como-usar.md)
-2. [docs/01-escopo.md](docs/01-escopo.md)
-3. [docs/02-decisoes.md](docs/02-decisoes.md)
-4. [docs/06-plano-de-acao.md](docs/06-plano-de-acao.md)
-5. [docs/07-historico.md](docs/07-historico.md)
+## O que é
 
-O relatório escrito da APS não é estes Markdowns. O roteiro para redigir esse relatório, alinhado com as decisões daqui, está em [docs/relatorio/TEMPLATE-APS.md](docs/relatorio/TEMPLATE-APS.md).
+O EcoPulse é um aplicativo móvel ligado a um sistema distribuído orientado a eventos. Ele mostra em um mapa o **calor**, a **qualidade do ar**, os **alagamentos** e as **vias obstruídas** de uma região, recebe **relatos colaborativos** dos usuários e **alerta em tempo real** quando alguém se aproxima de um risco.
+
+- **Calor e qualidade do ar:** células hexagonais (H3) com dados da [Open-Meteo](https://open-meteo.com/).
+- **Alagamento e via obstruída:** pontos criados pelos relatos dos usuários. Dois relatos do mesmo tipo na mesma célula em até 2 horas confirmam o incidente.
+- **Alertas:** faixa no mapa quando o usuário está a até 500 m de um incidente confirmado, ou em uma célula com AQI acima de 150 ou temperatura acima de 35 °C.
+- **Modo offline:** relatos feitos sem rede ficam guardados no aparelho e são enviados em ordem quando a conexão volta.
+
+<p align="center">
+  <img src="docs/telas/visao-geral.png" alt="Telas do aplicativo EcoPulse" width="900">
+</p>
+
+## Arquitetura
+
+Arquitetura orientada a eventos com quatro processos de aplicação (aplicativo, API, worker de relatos e worker de clima) e três serviços de apoio (RabbitMQ, PostgreSQL com PostGIS e Redis). A API recebe o relato, publica na fila e responde sem esperar; o worker processa, grava e gera os alertas; o WebSocket entrega as atualizações aos clientes.
+
+<p align="center">
+  <img src="docs/imagens/arquitetura.png" alt="Arquitetura do EcoPulse" width="900">
+</p>
+
+| Parte | Tecnologia |
+|---|---|
+| Aplicativo | React Native (Expo), MapLibre, SQLite |
+| API e workers | Node.js, Express, `ws` (WebSocket) |
+| Mensageria | RabbitMQ (fila durável, ack manual, novas tentativas, fila de mensagens mortas) |
+| Banco de dados | PostgreSQL com PostGIS |
+| Cache e pub/sub | Redis |
+| Particionamento geográfico | H3 |
+| Infraestrutura | Docker e Docker Compose |
+
+Conceitos de sistemas distribuídos aplicados: desacoplamento por mensageria assíncrona, tolerância a falhas, consistência eventual entre cache e banco, particionamento geoespacial e comunicação em tempo real.
+
+## Como rodar
+
+> A infraestrutura e o código ainda estão sendo construídos (etapa 1 em diante). Esta seção será preenchida quando o ambiente existir.
+
+Previsto:
+
+```bash
+cp .env.example .env
+docker compose up --build        # sobe banco, Redis, RabbitMQ, API e workers
+```
+
+O aplicativo (Expo) roda fora do Compose, no celular físico e no navegador, apontando para o endereço da API na rede local.
+
+## Documentação
+
+Toda a documentação de projeto está em [`docs/`](docs/):
+
+| Arquivo | Conteúdo |
+|---|---|
+| [`00-leia-me.md`](docs/00-leia-me.md) | Regras de trabalho e ordem de leitura (**comece por aqui**) |
+| [`11-progresso.md`](docs/11-progresso.md) | Lista de tarefas em ordem e o que já foi feito |
+| [`01-escopo-mvp.md`](docs/01-escopo-mvp.md) | Escopo, o que fica de fora e roteiro da demonstração |
+| [`02-regras-e-constantes.md`](docs/02-regras-e-constantes.md) | Regras de negócio e constantes |
+| [`03-stack-e-estrutura.md`](docs/03-stack-e-estrutura.md) | Tecnologias, estrutura de pastas e ambiente |
+| [`04-contratos.md`](docs/04-contratos.md) | API REST, WebSocket, RabbitMQ e Redis |
+| [`05-banco-de-dados.md`](docs/05-banco-de-dados.md) | Esquema do PostgreSQL e do SQLite |
+| [`06-integracoes-externas.md`](docs/06-integracoes-externas.md) | Open-Meteo, mapa e busca de endereço |
+| [`07-app-telas.md`](docs/07-app-telas.md) | Telas, componentes e design |
+| [`08-testes.md`](docs/08-testes.md) | Casos de teste e critérios de aceite |
+| [`09-plano-de-entrega.md`](docs/09-plano-de-entrega.md) | Calendário, cortes possíveis e evidências para o relatório |
+| [`10-decisoes-tomadas.md`](docs/10-decisoes-tomadas.md) | Decisões de projeto fora do relatório |
+| [`docs/telas/`](docs/telas/) | As 14 telas do aplicativo, com as notas de cada uma |
+| [`docs/relatorio/`](docs/relatorio/) | Relatório da APS (PDF) |
+
+## Como contribuir
+
+- Uma **branch por etapa** (`etapa-1-infraestrutura` … `etapa-6-fechamento`), criada a partir da `develop`.
+- **Um commit por tarefa** de [`docs/11-progresso.md`](docs/11-progresso.md), com a marcação `[x]` no mesmo commit. Mensagem no formato `<número> <resumo>` (ex.: `1.3 Esquema SQL do banco`).
+- Pull request da etapa para a `develop`, com revisão de outro integrante. A `develop` vai para a `main` só quando o conjunto estiver completo e funcionando.
+- Dúvida técnica ou algo que os documentos não cobrem: não decidir por suposição; avisar o grupo. Detalhes em [`docs/00-leia-me.md`](docs/00-leia-me.md).
 
 ## Equipe
 
-- Davi
-- Vinicius
+- Vinicius Oliveira dos Santos
+- Gabriel Boaron Dalsas Resende
+- Carlos Eduardo Martins Penna
+- Felipe Cantareli Andrucioli
+- Davi Fernando Sousa Dias
 
-## O que a demo precisa mostrar
+## Licença e uso
 
-Um mapa mundial, no gesto de abrir e explorar qualquer lugar. A história contada para a banca acontece em Ribeirão Preto: calor e qualidade do ar reais no mapa, um celular publica um alagamento, o outro recebe o alerta.
+Projeto acadêmico, desenvolvido para a disciplina de Desenvolvimento de Sistemas Distribuídos da UNIP. Os dados de clima e qualidade do ar vêm da [Open-Meteo](https://open-meteo.com/) (atribuição exibida no aplicativo) e o mapa usa dados do © OpenStreetMap contributors.

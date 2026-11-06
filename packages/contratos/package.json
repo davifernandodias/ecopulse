@@ -1,0 +1,9 @@
+{
+  "name": "@ecopulse/contratos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "exports": { ".": "./index.js", "./geo": "./geo.js" },
+  "dependencies": { "h3-js": "^4.5.0" }
+}

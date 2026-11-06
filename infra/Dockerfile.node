@@ -1,0 +1,20 @@
+# Imagem única para api, worker-relatos e worker-clima. O serviço vem no build-arg APP.
+FROM node:24-alpine
+
+ARG APP
+ENV APP=${APP}
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY packages/contratos/package.json packages/contratos/
+COPY packages/servico/package.json packages/servico/
+COPY apps/api/package.json apps/api/
+COPY apps/worker-relatos/package.json apps/worker-relatos/
+COPY apps/worker-clima/package.json apps/worker-clima/
+RUN npm ci --omit=dev
+
+COPY packages packages
+COPY apps/${APP} apps/${APP}
+
+USER node
+CMD ["sh", "-c", "node apps/${APP}/src/index.js"]

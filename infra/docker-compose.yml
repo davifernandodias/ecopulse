@@ -1,0 +1,111 @@
+# EcoPulse — subida local. Uso: na pasta infra, `docker compose up -d --build`
+# (ou `npm run infra:up` na raiz). Variáveis em infra/.env (copiar de .env.example);
+# sem .env os valores padrão abaixo já funcionam.
+
+name: ecopulse
+
+x-node-env: &node-env
+  NODE_ENV: production
+  DATABASE_URL: postgres://${POSTGRES_USER:-ecopulse}:${POSTGRES_PASSWORD:-ecopulse_dev}@postgres:5432/${POSTGRES_DB:-ecopulse}
+  REDIS_URL: redis://redis:6379
+  AMQP_URL: amqp://${RABBITMQ_USER:-ecopulse}:${RABBITMQ_PASSWORD:-ecopulse_dev}@rabbitmq:5672
+
+services:
+  postgres:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ecopulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ecopulse_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-ecopulse}
+    ports:
+      - "${POSTGRES_PORTA:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ecopulse} -d ${POSTGRES_DB:-ecopulse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "${REDIS_PORTA:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-ecopulse}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-ecopulse_dev}
+    ports:
+      # Portas do host deslocadas (5673/15673) para não colidir com um RabbitMQ instalado no Windows.
+      - "${RABBITMQ_PORTA:-5673}:5672"
+      - "${RABBITMQ_PAINEL_PORTA:-15673}:15672"
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.node
+      args:
+        APP: api
+    environment:
+      <<: *node-env
+      PORTA: 3000
+    ports:
+      - "${API_PORTA:-3000}:3000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    healthcheck:
+      # 127.0.0.1 e não localhost: no Alpine, localhost resolve para ::1 e a api escuta em IPv4.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/saude"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  worker-relatos:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.node
+      args:
+        APP: worker-relatos
+    environment:
+      <<: *node-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    restart: unless-stopped
+
+  worker-clima:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.node
+      args:
+        APP: worker-clima
+    environment:
+      <<: *node-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  rabbitdata:

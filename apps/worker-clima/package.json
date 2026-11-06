@@ -1,0 +1,18 @@
+{
+  "name": "@ecopulse/worker-clima",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@ecopulse/contratos": "^0.1.0",
+    "@ecopulse/servico": "^0.1.0",
+    "amqplib": "^0.10.9",
+    "h3-js": "^4.5.0",
+    "ioredis": "^5.11.1",
+    "pg": "^8.23.1"
+  }
+}

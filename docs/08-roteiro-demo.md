@@ -26,6 +26,9 @@ Antes de falar com a banca, os containers estão no ar e o app já abriu uma vez
 
 - Clima vazio: o worker ainda está na primeira consulta. Esperar e mostrar o incidente, que não depende da Open-Meteo.
 - Celular não conecta: conferir Wi-Fi e IP. O navegador em `localhost` ainda demonstra o segundo cliente se a API estiver na própria máquina; o celular é que precisa do IP.
+- Celular não abre nem `http://IP-DA-MAQUINA:3000/saude` no navegador, mesmo na mesma Wi-Fi: o roteador isola os aparelhos (comum em rede de faculdade e de visitantes). Ligar o hotspot do celular, conectar o notebook nele e subir o Expo com o IP novo: `$env:REACT_NATIVE_PACKAGER_HOSTNAME="172.20.10.x"; npx expo start` (o IP sai do `ipconfig`). Fixar o IP evita o Expo escolher o adaptador do WSL. Aconteceu no primeiro teste, em 2026-11-05.
+- No iPhone, o Expo Go precisa da permissão de Rede Local (Ajustes > Privacidade e Segurança > Rede Local).
+- Com o hotspot, não usar modo avião para o teste offline: ele derruba o notebook junto. Desligar só o Acesso Pessoal por alguns segundos.
 - Fila parada: mostrar a mensagem na DLQ e explicar retry. Isso também demonstra tolerância a falhas, desde que a causa seja dita com honestidade.
 
 ## O que não improvisar na frente da banca

@@ -22,14 +22,14 @@ Mudou alguma linha daqui: registrar em `07-historico.md` e ajustar o template do
 | --- | --- | --- |
 | App | React Native com Expo | Davi já usou React Native. Expo abre no celular físico e no navegador, então a demo tem dois clientes sem obrigar dois aparelhos |
 | Mapa | MapLibre | Mesmo gesto de um mapa mundial, sem chave e sem cobrança por arrastar o mapa. Tiles gratuitos (OpenFreeMap). Atribuição visível no canto |
-| Mapa nativo | `@maplibre/maplibre-react-native` | Celular |
-| Mapa web | `maplibre-gl` | Navegador. A lógica de camadas é compartilhada; o componente de mapa troca pela plataforma |
+| Mapa no celular | `maplibre-gl` dentro de `react-native-webview` | Roda no Expo Go, sem build nativo, sem Android Studio e sem conta Expo. Decidido em 2026-11-05 (ver `07-historico.md`). Substitui `@maplibre/maplibre-react-native` |
+| Mapa web | `maplibre-gl` num iframe | Navegador. A página do mapa é a mesma do celular (`apps/mobile/src/mapa/mapaHtml.ts`); só o contêiner troca pela plataforma |
 | Backend | Node.js (versão LTS atual no momento da implementação) + Express | Pedido do grupo. Express deixa o fluxo legível no relatório de código |
 | Mensageria | RabbitMQ | Cobre desacoplamento, retry e DLQ com um container. É uma das opções do enunciado |
 | Banco | PostgreSQL + PostGIS | Ponto geográfico, consulta por retângulo e por raio |
 | Cache e fan-out | Redis, um container | Leitura quente do mapa e pub/sub do alerta. O relatório descreve o papel de cache distribuído; a demo sobe um nó |
 | Tempo real | WebSocket (`ws`) no processo da API | O alerta chega no cliente sem o usuário atualizar a tela |
-| Offline | SQLite no app (`expo-sqlite`) | Fila local de relatos |
+| Offline | SQLite no app (`expo-sqlite`) | Fila local de relatos. No navegador a mesma interface usa `localStorage` (SQLite web pede WASM e cabeçalhos especiais) |
 | Empacotamento | Docker Compose | API, workers, RabbitMQ, PostgreSQL e Redis |
 | Clima e ar | Open-Meteo | Gratuita, sem chave, cobertura mundial. Atribuição obrigatória na ficha do lugar |
 
@@ -79,21 +79,23 @@ O cliente manda a posição em intervalo curto enquanto o mapa está aberto. A A
 
 Escrita do relato: fila, depois PostgreSQL, depois Redis. Leitura do mapa: Redis primeiro; se a chave não existe, PostgreSQL, e a resposta de clima pode chegar um instante depois pelo WebSocket. Isso é a consistência eventual pedida no enunciado.
 
-## Árvore prevista do código
-
-Ainda não criar essa árvore até a tarefa correspondente em `06-plano-de-acao.md`.
+## Árvore do código
 
 ```text
 ecopulse/
   apps/
-    mobile/
+    mobile/            Expo (fora dos workspaces npm da raiz; tem package.json próprio)
     api/
     worker-relatos/
     worker-clima/
   packages/
-    contratos/
+    contratos/         filas, validação, constantes, helpers H3 (geo.js)
+    servico/           conexões RabbitMQ, Redis e PostgreSQL usadas pela api e pelos workers
   infra/
     docker-compose.yml
+    Dockerfile.node    imagem única dos três serviços Node
+    sql/001-inicial.sql
+  scripts/             teste-fluxo.mjs (ponta a ponta) e semear-demo.mjs
   docs/
 ```
 

@@ -1,0 +1,27 @@
+{
+  "name": "ecopulse",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/contratos",
+    "packages/servico",
+    "apps/api",
+    "apps/worker-relatos",
+    "apps/worker-clima"
+  ],
+  "scripts": {
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d --build",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "infra:logs": "docker compose -f infra/docker-compose.yml logs -f api worker-relatos worker-clima",
+    "semear": "node scripts/semear-demo.mjs",
+    "teste:fluxo": "node scripts/teste-fluxo.mjs",
+    "mobile": "npm --prefix apps/mobile run start",
+    "mobile:web": "npm --prefix apps/mobile run web"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "amqplib": "^0.10.9"
+  }
+}

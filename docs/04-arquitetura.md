@@ -166,4 +166,15 @@ Campos em português, JSON.
 
 `infra/docker-compose.yml` sobe PostgreSQL/PostGIS, Redis, RabbitMQ (com painel de gestão), api, worker-relatos e worker-clima. O app Expo roda fora do Compose, no celular ou no navegador, apontando para o IP da máquina na rede local.
 
-O celular físico não enxerga `localhost` da máquina. A URL da API na demo é o IP da rede Wi-Fi. Isso entra no roteiro de demo.
+O celular físico não enxerga `localhost` da máquina. A URL da API na demo é o IP da rede Wi-Fi. O app descobre esse IP sozinho a partir do endereço do Metro (o mesmo IP do QR code do Expo), porta 3000. `EXPO_PUBLIC_API_URL` sobrescreve.
+
+Portas no host: api 3000, PostgreSQL 5432, Redis 6379, RabbitMQ **5673** (AMQP) e **15673** (painel). As do RabbitMQ estão deslocadas porque a máquina de desenvolvimento já tem um RabbitMQ instalado no Windows em 5672/15672.
+
+## Detalhes que a implementação fixou (2026-11-05)
+
+- **Chave de incidentes no Redis:** `incidentes:h3:{indice}` usa a célula **res. 7** pai da célula res. 9 do incidente, para a leitura do mapa usar as mesmas células do clima. O worker reescreve a lista inteira da célula a partir do PostgreSQL depois de cada relato. A api, quando a chave falta, lê o PostgreSQL e preenche o cache só se a chave ainda não existir (`SET NX`, 2 min), para nunca sobrescrever o que o worker escreveu.
+- **Retry:** uma fila de espera por degrau (`<fila>.retry.2s`, `.4s`, `.8s`) com TTL e dead-letter de volta para a fila principal. Contagem no header `x-ecopulse-tentativas`; motivo da DLQ em `x-ecopulse-motivo`.
+- **Open-Meteo:** o worker consulta um ponto por célula pai **res. 6** e repete o valor nas 7 células res. 7 filhas. A grade da fonte é de alguns quilômetros, então o resultado é o mesmo com 7x menos chamadas, dentro do limite por minuto da versão gratuita. As células continuam res. 7 no mapa, no Redis e no PostgreSQL.
+- **Retângulo com margem:** as células de um `bbox` são calculadas com margem de ~1,5 km, senão as bordas da tela ficam sem mancha.
+- **Rotas extras da api:** `GET /busca?q=` (Nominatim, com User-Agent do app), `GET /lugar?lat=&lon=` (nome aproximado para a ficha, cache de 1 dia no Redis) e `GET /status/filas` (contagem das filas para a demo).
+- **Mensagem de incidente no WebSocket:** além de `alerta.gerado`, o worker publica `camada.atualizada` com `camada: 'incidentes'` para o pino aparecer no outro cliente mesmo com gravidade baixa (que não gera alerta).

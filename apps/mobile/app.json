@@ -36,7 +36,8 @@
         {
           "locationWhenInUsePermission": "O EcoPulse usa sua localização para preencher o relato e avisar quando você se aproxima de um risco."
         }
-      ]
+      ],
+      "expo-font"
     ]
   }
 }

@@ -1,8 +1,8 @@
 // Página do mapa. A mesma página roda numa WebView (celular, Expo Go) e num iframe (navegador).
-// MapLibre GL + tiles OpenFreeMap; h3-js desenha o contorno das células de calor e ar.
+// MapLibre GL + tiles OpenFreeMap; h3-js desenha as células. Cores e medidas: docs/06 §4 e docs/07.
 // Mensagens: app -> mapa por window.__receber(msg); mapa -> app por postMessage.
 
-export const RIBEIRAO = { latitude: -21.1775, longitude: -47.8103 };
+export const RIBEIRAO = { latitude: -21.1775, longitude: -47.8103, zoom: 12 };
 
 export const mapaHtml = `<!doctype html>
 <html><head>
@@ -12,9 +12,10 @@ export const mapaHtml = `<!doctype html>
 <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/h3-js@4.5.0/dist/h3-js.umd.js"></script>
 <style>
-  html,body,#mapa{margin:0;padding:0;width:100%;height:100%;background:#e5e7eb}
-  .maplibregl-ctrl-attrib{font-size:10px}
-  #erro{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font:14px system-ui;color:#374151;text-align:center;padding:24px}
+  html,body,#mapa{margin:0;padding:0;width:100%;height:100%;background:#E4EAE1}
+  .maplibregl-ctrl-bottom-right{bottom:0;right:0}
+  .maplibregl-ctrl-attrib{font:10px system-ui;background:rgba(255,255,255,.7)!important}
+  #erro{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font:15px system-ui;color:#4A5D55;text-align:center;padding:24px}
 </style>
 </head><body>
 <div id="mapa"></div>
@@ -34,36 +35,56 @@ export const mapaHtml = `<!doctype html>
 
   var clima = new Map();      // h3 -> {h3, temperatura, aqi, lidoEm}
   var incidentes = new Map(); // id -> incidente
-  var visivel = { calor: true, ar: true, alagamento: true, vias: true };
-  var eu = null, simulado = false;
+  var visivel = { ar: true, calor: false, alagamento: true, vias: true };
+  var eu = null, simulado = false, semConexao = false;
+  var selecao = { h3: null, incidenteId: null };
+  var alerta = null;          // {incidenteId?, h3?}
 
   var mapa = new maplibregl.Map({
     container: 'mapa',
     style: 'https://tiles.openfreemap.org/styles/liberty',
     center: [${RIBEIRAO.longitude}, ${RIBEIRAO.latitude}],
-    zoom: 12,
-    attributionControl: { compact: true, customAttribution: 'OpenFreeMap © OpenStreetMap' },
+    zoom: ${RIBEIRAO.zoom},
+    minZoom: 9,
+    attributionControl: false, // a atribuição do mapa base aparece no app, junto com a da Open-Meteo
     dragRotate: false,
     pitchWithRotate: false
   });
   mapa.touchZoomRotate.disableRotation();
-  window.__mapa = mapa; // depuração
 
-  function contorno(h3idx, escala){
+  // Ícones dos pontos (tela 1): gota no círculo azul e losango escuro com traço.
+  function icone(desenhar){
+    var px = 2, t = 34 * px, c = document.createElement('canvas');
+    c.width = c.height = t;
+    var g = c.getContext('2d');
+    desenhar(g, t, px);
+    return { width: t, height: t, data: g.getImageData(0, 0, t, t).data };
+  }
+  var iconeAlagamento = icone(function(g, t, px){
+    g.beginPath(); g.arc(t/2, t/2, t/2 - 1, 0, Math.PI*2); g.fillStyle = '#fff'; g.fill();
+    g.beginPath(); g.arc(t/2, t/2, t/2 - 4*px, 0, Math.PI*2); g.fillStyle = '#1B5E9B'; g.fill();
+    g.beginPath(); g.moveTo(t/2, t/2 - 7*px);
+    g.bezierCurveTo(t/2 + 6*px, t/2 + 1*px, t/2 + 5*px, t/2 + 7*px, t/2, t/2 + 7*px);
+    g.bezierCurveTo(t/2 - 5*px, t/2 + 7*px, t/2 - 6*px, t/2 + 1*px, t/2, t/2 - 7*px);
+    g.fillStyle = '#fff'; g.fill();
+  });
+  var iconeVia = icone(function(g, t, px){
+    function losango(r, cor){ g.beginPath(); g.moveTo(t/2, t/2-r); g.lineTo(t/2+r, t/2); g.lineTo(t/2, t/2+r); g.lineTo(t/2-r, t/2); g.closePath(); g.fillStyle = cor; g.fill(); }
+    losango(t/2 - 1, '#fff'); losango(t/2 - 5*px, '#12261F');
+    g.fillStyle = '#fff'; g.fillRect(t/2 - 6*px, t/2 - 1.5*px, 12*px, 3*px);
+  });
+
+  function contorno(h3idx){
     var b = h3.cellToBoundary(h3idx, true); // [lng, lat]
-    if (escala !== 1) {
-      var c = h3.cellToLatLng(h3idx);
-      b = b.map(function(p){ return [c[1] + (p[0]-c[1])*escala, c[0] + (p[1]-c[0])*escala]; });
-    }
     b.push(b[0]);
     return [b];
   }
 
-  function geoClima(escala){
+  function geoClima(){
     var f = [];
     clima.forEach(function(c){
       f.push({ type:'Feature', properties:{ h3:c.h3, temperatura:c.temperatura, aqi:c.aqi },
-               geometry:{ type:'Polygon', coordinates: contorno(c.h3, escala) } });
+               geometry:{ type:'Polygon', coordinates: contorno(c.h3) } });
     });
     return { type:'FeatureCollection', features:f };
   }
@@ -73,8 +94,7 @@ export const mapaHtml = `<!doctype html>
     incidentes.forEach(function(i){
       if (i.tipo === 'alagamento' && !visivel.alagamento) return;
       if (i.tipo === 'via_obstruida' && !visivel.vias) return;
-      f.push({ type:'Feature', properties:{ id:i.id, tipo:i.tipo, gravidade:i.gravidade, status:i.status,
-               letra: i.tipo === 'alagamento' ? 'A' : 'V' },
+      f.push({ type:'Feature', properties:{ id:i.id, tipo:i.tipo, icone: i.tipo === 'alagamento' ? 'alagamento' : 'via' },
                geometry:{ type:'Point', coordinates:[i.longitude, i.latitude] } });
     });
     return { type:'FeatureCollection', features:f };
@@ -85,59 +105,94 @@ export const mapaHtml = `<!doctype html>
       geometry:{ type:'Point', coordinates:[eu.longitude, eu.latitude] } }] : [] };
   }
 
-  var pronto = false;
-  function redesenharClima(){ if(!pronto) return; mapa.getSource('calor').setData(geoClima(1)); mapa.getSource('ar').setData(geoClima(0.45)); }
-  function redesenharIncidentes(){ if(!pronto) return; mapa.getSource('incidentes').setData(geoIncidentes()); }
-  function redesenharEu(){ if(!pronto) return; mapa.getSource('eu').setData(geoEu()); }
+  // Círculo de 500 m em volta do usuário durante um alerta de incidente (tela 10).
+  function geoRaio(){
+    if (!alerta || !alerta.incidenteId || !eu) return { type:'FeatureCollection', features:[] };
+    var pts = [], r = 500, lat = eu.latitude * Math.PI / 180;
+    for (var i = 0; i <= 64; i++) {
+      var a = i / 64 * Math.PI * 2;
+      pts.push([eu.longitude + (r * Math.cos(a)) / (111320 * Math.cos(lat)), eu.latitude + (r * Math.sin(a)) / 110540]);
+    }
+    return { type:'FeatureCollection', features:[{ type:'Feature', properties:{}, geometry:{ type:'Polygon', coordinates:[pts] } }] };
+  }
 
-  function aplicarVisibilidade(){
+  var pronto = false;
+  function redesenharClima(){ if(pronto) mapa.getSource('clima').setData(geoClima()); }
+  function redesenharIncidentes(){ if(pronto) mapa.getSource('incidentes').setData(geoIncidentes()); }
+  function redesenharEu(){ if(pronto) { mapa.getSource('eu').setData(geoEu()); mapa.getSource('raio').setData(geoRaio()); } }
+
+  var temValor = function(campo){ return ['!=', ['typeof', ['get', campo]], 'null']; };
+  var semValor = function(campo){ return ['==', ['typeof', ['get', campo]], 'null']; };
+  // Faixas de cor de docs/06 §4.
+  var corAqi = ['step', ['to-number', ['get','aqi'], 0], '#F2D16B', 51,'#F0A04B', 101,'#D9622B', 151,'#9B3A1A'];
+  var corCalor = ['step', ['to-number', ['get','temperatura'], 0], '#F6D5D0', 25,'#EE9A8F', 30,'#D6455D', 35,'#8C1D40'];
+
+  // Regras de exibição: só ar = preenchimento de AQI; só calor = preenchimento de temperatura;
+  // os dois = calor preenchido e ar como contorno de 4 px (decisão D17).
+  function aplicarCamadas(){
     if(!pronto) return;
-    mapa.setLayoutProperty('calor-fill', 'visibility', visivel.calor ? 'visible' : 'none');
-    mapa.setLayoutProperty('ar-fill', 'visibility', visivel.ar ? 'visible' : 'none');
-    mapa.setLayoutProperty('ar-borda', 'visibility', visivel.ar ? 'visible' : 'none');
+    var op = semConexao ? 0.40 : 0.62;
+    var mostra = function(id, sim){ mapa.setLayoutProperty(id, 'visibility', sim ? 'visible' : 'none'); };
+    var soAr = visivel.ar && !visivel.calor;
+    mapa.setPaintProperty('clima-fill', 'fill-color', visivel.calor ? corCalor : corAqi);
+    mapa.setFilter('clima-fill', temValor(visivel.calor ? 'temperatura' : 'aqi'));
+    mapa.setPaintProperty('clima-fill', 'fill-opacity', op);
+    mostra('clima-fill', visivel.ar || visivel.calor);
+    mostra('clima-borda', visivel.ar || visivel.calor);
+    mostra('ar-contorno', visivel.ar && visivel.calor);
+    mapa.setFilter('sem-dado', semValor(visivel.calor ? 'temperatura' : 'aqi'));
+    mostra('sem-dado', visivel.ar || visivel.calor);
     redesenharIncidentes();
   }
 
+  function aplicarSelecao(){
+    if(!pronto) return;
+    mapa.setFilter('celula-selecionada', ['==', ['get','h3'], selecao.h3 || '']);
+    mapa.setFilter('ponto-selecionado', ['==', ['get','id'], selecao.incidenteId || '']);
+    mapa.setFilter('ponto-alerta', ['==', ['get','id'], (alerta && alerta.incidenteId) || '']);
+    mapa.setFilter('celula-alerta', ['==', ['get','h3'], (alerta && !alerta.incidenteId && alerta.h3) || '']);
+    mapa.getSource('raio').setData(geoRaio());
+  }
+
   mapa.on('load', function(){
-    mapa.addSource('calor', { type:'geojson', data: geoClima(1) });
-    mapa.addSource('ar', { type:'geojson', data: geoClima(0.45) });
+    mapa.addImage('alagamento', iconeAlagamento, { pixelRatio: 2 });
+    mapa.addImage('via', iconeVia, { pixelRatio: 2 });
+    mapa.addSource('clima', { type:'geojson', data: geoClima() });
     mapa.addSource('incidentes', { type:'geojson', data: geoIncidentes() });
     mapa.addSource('eu', { type:'geojson', data: geoEu() });
+    mapa.addSource('raio', { type:'geojson', data: geoRaio() });
 
-    // Calor: azul abaixo de 20 °C, amarelo por volta de 28 °C, vermelho a partir de 35 °C.
-    // Paradas intermediárias (24 °C azul-claro, 31 °C laranja) para a faixa do meio não virar
-    // um cinza-esverdeado que some no mapa base.
-    mapa.addLayer({ id:'calor-fill', type:'fill', source:'calor',
-      filter:['!=', ['typeof', ['get','temperatura']], 'null'],
-      paint:{ 'fill-color':['interpolate',['linear'],['to-number',['get','temperatura'],0],
-                20,'#2563eb', 24,'#38bdf8', 28,'#facc15', 31,'#fb923c', 35,'#dc2626'],
-              'fill-opacity':0.45, 'fill-outline-color':'rgba(255,255,255,0.7)' } });
-    // Ar: hexágono interno, cor por faixa do US AQI, com borda branca para separar do calor.
-    mapa.addLayer({ id:'ar-fill', type:'fill', source:'ar',
-      filter:['!=', ['typeof', ['get','aqi']], 'null'],
-      paint:{ 'fill-color':['step',['to-number',['get','aqi'],0], '#16a34a', 51,'#eab308', 101,'#f97316', 151,'#dc2626'],
-              'fill-opacity':0.7 } });
-    mapa.addLayer({ id:'ar-borda', type:'line', source:'ar',
-      filter:['!=', ['typeof', ['get','aqi']], 'null'],
-      paint:{ 'line-color':'#ffffff', 'line-width':1.5, 'line-opacity':0.9 } });
+    mapa.addLayer({ id:'clima-fill', type:'fill', source:'clima', paint:{ 'fill-color': corAqi, 'fill-opacity': 0.62 } });
+    mapa.addLayer({ id:'clima-borda', type:'line', source:'clima', paint:{ 'line-color':'#ffffff', 'line-width':2 } });
+    // Célula sem dado: sem cor, contorno tracejado (nunca inventar valor).
+    mapa.addLayer({ id:'sem-dado', type:'line', source:'clima',
+      paint:{ 'line-color':'#4A5D55', 'line-width':2, 'line-dasharray':[2, 2] } });
+    mapa.addLayer({ id:'ar-contorno', type:'line', source:'clima', filter: temValor('aqi'),
+      paint:{ 'line-color': corAqi, 'line-width':4, 'line-offset':-2 } });
+    mapa.addLayer({ id:'celula-alerta', type:'line', source:'clima', filter:['==',['get','h3'],''],
+      paint:{ 'line-color':'#7A2E0B', 'line-width':4, 'line-dasharray':[2, 1.5] } });
+    mapa.addLayer({ id:'celula-selecionada', type:'line', source:'clima', filter:['==',['get','h3'],''],
+      paint:{ 'line-color':'#12261F', 'line-width':4 } });
+
+    mapa.addLayer({ id:'raio-fill', type:'fill', source:'raio', paint:{ 'fill-color':'#4A5D55', 'fill-opacity':0.10 } });
+    mapa.addLayer({ id:'raio-linha', type:'line', source:'raio',
+      paint:{ 'line-color':'#7A2E0B', 'line-width':2, 'line-dasharray':[3, 2] } });
 
     mapa.addLayer({ id:'eu-halo', type:'circle', source:'eu',
-      paint:{ 'circle-radius':16, 'circle-color':['case',['get','simulado'],'#a855f7','#2563eb'], 'circle-opacity':0.18 } });
+      paint:{ 'circle-radius':20, 'circle-color':['case',['get','simulado'],'#7B4FB8','#1D6FB8'], 'circle-opacity':0.22 } });
     mapa.addLayer({ id:'eu', type:'circle', source:'eu',
-      paint:{ 'circle-radius':7, 'circle-color':['case',['get','simulado'],'#a855f7','#2563eb'],
-              'circle-stroke-color':'#fff', 'circle-stroke-width':2.5 } });
+      paint:{ 'circle-radius':8, 'circle-color':['case',['get','simulado'],'#7B4FB8','#1D6FB8'],
+              'circle-stroke-color':'#fff', 'circle-stroke-width':3 } });
 
-    mapa.addLayer({ id:'incidentes', type:'circle', source:'incidentes',
-      paint:{ 'circle-radius':12,
-              'circle-color':['match',['get','gravidade'],'alta','#dc2626','media','#f97316','#facc15'],
-              'circle-stroke-color':['match',['get','tipo'],'alagamento','#1d4ed8','#111827'],
-              'circle-stroke-width':['case',['==',['get','status'],'confirmado'],4,2.5] } });
-    mapa.addLayer({ id:'incidentes-letra', type:'symbol', source:'incidentes',
-      layout:{ 'text-field':['get','letra'], 'text-font':['Noto Sans Bold'], 'text-size':12, 'text-allow-overlap':true },
-      paint:{ 'text-color':'#fff' } });
+    mapa.addLayer({ id:'ponto-alerta', type:'circle', source:'incidentes', filter:['==',['get','id'],''],
+      paint:{ 'circle-radius':21, 'circle-color':'#7A2E0B' } });
+    mapa.addLayer({ id:'ponto-selecionado', type:'circle', source:'incidentes', filter:['==',['get','id'],''],
+      paint:{ 'circle-radius':21, 'circle-color':'#12261F' } });
+    mapa.addLayer({ id:'incidentes', type:'symbol', source:'incidentes',
+      layout:{ 'icon-image':['get','icone'], 'icon-allow-overlap':true, 'icon-ignore-placement':true } });
 
     pronto = true;
-    aplicarVisibilidade();
+    aplicarCamadas(); aplicarSelecao();
     redesenharClima(); redesenharIncidentes(); redesenharEu();
     enviar({ tipo:'pronto' });
     avisarCamera();
@@ -153,17 +208,18 @@ export const mapaHtml = `<!doctype html>
     enviar({ tipo:'camera', bbox: bbox, zoom: mapa.getZoom(), centro:{ latitude:c.lat, longitude:c.lng } });
   }
   // Espera o gesto terminar antes de pedir camada (não publica um pedido por frame).
-  mapa.on('moveend', function(){ clearTimeout(tCamera); tCamera = setTimeout(avisarCamera, 450); });
+  mapa.on('moveend', function(){ clearTimeout(tCamera); tCamera = setTimeout(avisarCamera, 500); });
 
   mapa.on('click', function(e){
-    var pad = 10, p = e.point;
-    var caixa = [[p.x-pad,p.y-pad],[p.x+pad,p.y+pad]];
-    var pin = mapa.queryRenderedFeatures(caixa, { layers:['incidentes'] })[0];
+    var pad = 14, p = e.point;
+    var pin = mapa.queryRenderedFeatures([[p.x-pad,p.y-pad],[p.x+pad,p.y+pad]], { layers:['incidentes'] })[0];
     if (pin) { enviar({ tipo:'toquePino', id: pin.properties.id }); return; }
-    var camadas = [];
-    if (visivel.ar) camadas.push('ar-fill');
-    if (visivel.calor) camadas.push('calor-fill');
-    var cel = camadas.length ? mapa.queryRenderedFeatures(p, { layers: camadas })[0] : null;
+    var cel = (visivel.ar || visivel.calor) ? mapa.queryRenderedFeatures(p, { layers: ['clima-fill', 'sem-dado'] })[0] : null;
+    if (!cel && (visivel.ar || visivel.calor)) {
+      // Célula sem dado não tem preenchimento: procura pelo ponto dentro do hexágono.
+      var h = h3.latLngToCell(e.lngLat.lat, e.lngLat.lng, 7);
+      if (clima.has(h)) cel = { properties: { h3: h } };
+    }
     if (cel) { enviar({ tipo:'toqueCelula', h3: cel.properties.h3, latitude: e.lngLat.lat, longitude: e.lngLat.lng }); return; }
     enviar({ tipo:'toqueVazio', latitude: e.lngLat.lat, longitude: e.lngLat.lng });
   });
@@ -185,7 +241,13 @@ export const mapaHtml = `<!doctype html>
         msg.lista.forEach(function(i){ incidentes.set(i.id, i); });
         redesenharIncidentes(); break;
       case 'visibilidade':
-        visivel = msg.visivel; aplicarVisibilidade(); break;
+        visivel = msg.visivel; aplicarCamadas(); break;
+      case 'semConexao':
+        semConexao = !!msg.valor; aplicarCamadas(); break;
+      case 'selecao':
+        selecao = { h3: msg.h3 || null, incidenteId: msg.incidenteId || null }; aplicarSelecao(); break;
+      case 'alerta':
+        alerta = msg.alerta || null; aplicarSelecao(); break;
       case 'eu':
         eu = msg.posicao; simulado = !!msg.simulado; redesenharEu(); break;
       case 'voar':

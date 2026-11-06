@@ -50,3 +50,7 @@ export async function listarDispensados(): Promise<Record<string, number>> {
 
 export async function salvarCamadas(r: RespostaCamadas) { gravar('camadas_cache', r); }
 export async function ultimaCamada(): Promise<RespostaCamadas | null> { return ler('camadas_cache', null); }
+
+export async function removerOutbox(id: string) {
+  gravar('outbox', ler<ItemOutbox[]>('outbox', []).filter((i) => i.id !== id));
+}

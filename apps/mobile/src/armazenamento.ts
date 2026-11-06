@@ -73,3 +73,7 @@ export async function ultimaCamada(): Promise<RespostaCamadas | null> {
   const l = await db.getFirstAsync<{ json: string }>(`SELECT json FROM camadas_cache WHERE chave = 'ultima'`);
   return l ? JSON.parse(l.json) : null;
 }
+
+export async function removerOutbox(id: string) {
+  await db.runAsync('DELETE FROM outbox WHERE id = ?', id);
+}

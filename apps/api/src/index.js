@@ -261,9 +261,14 @@ function alertasDeClima(c) {
 // ---------- Subida ----------
 
 const servidor = http.createServer(app);
-iniciarTempoReal({ servidor, redis, redisUrl: process.env.REDIS_URL, riscosNaPosicao, alertaDeIncidente, alertasDeClima, celulaNoBbox });
+const { wss } = iniciarTempoReal({ servidor, redis, redisUrl: process.env.REDIS_URL, riscosNaPosicao, alertaDeIncidente, alertasDeClima, celulaNoBbox });
 servidor.listen(PORTA, '0.0.0.0', () => console.log(`[api] ouvindo em :${PORTA}`));
 
-const encerrar = () => servidor.close(() => process.exit(0));
+// Fecha os WebSockets antes: senão o close() espera por eles e o Docker mata o processo depois de 10 s.
+const encerrar = () => {
+  for (const ws of wss.clients) ws.terminate();
+  servidor.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 2000).unref();
+};
 process.on('SIGTERM', encerrar);
 process.on('SIGINT', encerrar);

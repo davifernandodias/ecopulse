@@ -13,6 +13,8 @@ export const mapaHtml = `<!doctype html>
 <script src="https://unpkg.com/h3-js@4.5.0/dist/h3-js.umd.js"></script>
 <style>
   html,body,#mapa{margin:0;padding:0;width:100%;height:100%;background:#E4EAE1}
+  /* Sem lupa nem menu do iOS ao segurar o dedo no mapa */
+  html,body{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
   .maplibregl-ctrl-bottom-right{bottom:0;right:0}
   .maplibregl-ctrl-attrib{font:10px system-ui;background:rgba(255,255,255,.7)!important}
   #erro{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font:15px system-ui;color:#4A5D55;text-align:center;padding:24px}
@@ -225,9 +227,33 @@ export const mapaHtml = `<!doctype html>
   });
 
   // Toque longo (ou botão direito) define uma posição simulada para ensaiar o alerta.
-  mapa.on('contextmenu', function(e){
-    enviar({ tipo:'toqueLongo', latitude: e.lngLat.lat, longitude: e.lngLat.lng });
-  });
+  var ultimoLongo = 0;
+  function toqueLongo(lat, lng){
+    if (Date.now() - ultimoLongo < 1000) return; // Android dispara contextmenu e o timer: vale um só
+    ultimoLongo = Date.now();
+    enviar({ tipo:'toqueLongo', latitude: lat, longitude: lng });
+  }
+  mapa.on('contextmenu', function(e){ cancelarLongo(); toqueLongo(e.lngLat.lat, e.lngLat.lng); });
+
+  // iPhone não dispara contextmenu no toque longo: conta o tempo do dedo parado.
+  var area = mapa.getCanvasContainer(), tLongo = null, inicio = null;
+  function cancelarLongo(){ clearTimeout(tLongo); tLongo = null; }
+  area.addEventListener('touchstart', function(ev){
+    cancelarLongo();
+    if (ev.touches.length !== 1) return;
+    inicio = { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+    tLongo = setTimeout(function(){
+      var r = area.getBoundingClientRect();
+      var ll = mapa.unproject([inicio.x - r.left, inicio.y - r.top]);
+      toqueLongo(ll.lat, ll.lng);
+    }, 600);
+  }, { passive: true });
+  area.addEventListener('touchmove', function(ev){
+    var t = ev.touches[0];
+    if (!inicio || ev.touches.length !== 1 || Math.abs(t.clientX - inicio.x) > 10 || Math.abs(t.clientY - inicio.y) > 10) cancelarLongo();
+  }, { passive: true });
+  area.addEventListener('touchend', cancelarLongo, { passive: true });
+  area.addEventListener('touchcancel', cancelarLongo, { passive: true });
 
   window.__receber = function(msg){
     switch (msg.tipo) {
